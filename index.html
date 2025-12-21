@@ -43,6 +43,8 @@
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/dist/date-fns.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@3.3.0/dist/chartjs-chart-financial.min.js"></script>
 </head>
 <body>
@@ -227,8 +229,7 @@
                     scales: {
                         x: {
                             type: 'time',
-                            time: { unit: 'day' },
-                            adapters: { date: { locale: undefined } }
+                            time: { unit: 'day' }
                         },
                         y: {
                             ticks: { callback: (v) => '$' + v },
@@ -237,11 +238,6 @@
                     }
                 }
             });
-        }
-
-        function toolTipFormatter(e) {
-            // Chart.js tooltips are configured via callbacks; we rely on defaults here.
-            return '';
         }
 
         async function loadForStock(stock) {
