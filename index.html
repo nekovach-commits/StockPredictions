@@ -1,218 +1,306 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Stock Viewer - CanvasJS</title>
-  <style>
-    body { font-family: Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
-    #controls { margin-bottom: 12px; }
-    #chartContainer { height: 640px; max-width: 1200px; margin: 0 auto; }
-    .hint { color: #444; font-size: 0.95rem; margin-top: 6px; }
-    input[type="text"] { padding: 6px; font-size: 1rem; width: 160px; }
-    button { padding: 6px 10px; font-size: 1rem; }
-  </style>
-  <script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Stock Viewer - CanvasJS</title>
+    <style>
+        body {
+            font-family: Segoe UI, Roboto, Arial, sans-serif;
+            margin: 16px;
+        }
+
+        #controls {
+            margin-bottom: 12px;
+        }
+
+        #chartContainer {
+            height: 640px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .hint {
+            color: #444;
+            font-size: 0.95rem;
+            margin-top: 6px;
+        }
+
+        input[type="text"] {
+            padding: 6px;
+            font-size: 1rem;
+            width: 160px;
+        }
+
+        button {
+            padding: 6px 10px;
+            font-size: 1rem;
+        }
+    </style>
+    <script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
 </head>
 <body>
-  <h2>Stock Viewer (CanvasJS)</h2>
-  <div id="controls">
-    <label for="stockInput">Stock symbol:</label>
-    <input id="stockInput" type="text" placeholder="e.g. TSLA" />
-    <button id="loadBtn">Load</button>
-    <button id="openNewTabBtn">Open ?stock URL</button>
-    <div class="hint">Tip: you can also load this page with <code>?stock=SYMBOL</code> (example: <code>index.html?stock=TSLA</code>).</div>
-  </div>
+    <h2>Stock Viewer (CanvasJS)</h2>
+    <div id="controls">
+        <label for="stockInput">Stock symbol:</label>
+        <input id="stockInput" type="text" placeholder="e.g. TSLA" />
+        <button id="loadBtn">Load</button>
+        <button id="openNewTabBtn">Open ?stock URL</button>
+        <div class="hint">Tip: you can also load this page with <code>?stock=SYMBOL</code> (example: <code>index.html?stock=TSLA</code>).</div>
+    </div>
 
-  <div id="chartContainer">Loading...</div>
-  <div id="status" class="hint"></div>
+    <div id="chartContainer">Loading...</div>
+    <div id="status" class="hint"></div>
 
-  <script>
-    // Utility: get query param
-    function getQueryParam(name) {
-      const params = new URLSearchParams(window.location.search);
-      return params.get(name);
-    }
+    <script>
+        // Utility: get query param
+        function getQueryParam(name) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get(name);
+        }
 
-    // Naive CSV parser for simple CSVs used by the app (no quoted commas expected)
-    function parseCsv(text) {
-      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-      if (lines.length <= 1) return [];
-      const rows = [];
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(',').map(p => p.trim().replace(/^"|"$/g, ''));
-        rows.push(parts);
-      }
-      return rows;
-    }
+        // Naive CSV parser for simple CSVs used by the app (no quoted commas expected)
+        function parseCsv(text) {
+            const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+            if (lines.length <= 1) return [];
+            const rows = [];
+            for (let i = 1; i < lines.length; i++) {
+                const parts = lines[i].split(',').map(p => p.trim().replace(/^"|"$/g, ''));
+                rows.push(parts);
+            }
+            return rows;
+        }
 
-    async function fetchText(url) {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
-      return await res.text();
-    }
+        // Parse ISO date 'YYYY-MM-DD' reliably across browsers
+        function parseIsoDate(s) {
+            if (!s) return null;
+            const m = s.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+            if (!m) return new Date(s); // fallback
+            const year = parseInt(m[1], 10);
+            const month = parseInt(m[2], 10) - 1;
+            const day = parseInt(m[3], 10);
+            return new Date(year, month, day);
+        }
 
-    function buildCandlestickPoints(rows) {
-      // expected: Date,Open,High,Low,Close
-      const pts = [];
-      for (const r of rows) {
-        if (r.length < 5) continue;
-        const d = new Date(r[0]);
-        const open = parseFloat(r[1]);
-        const high = parseFloat(r[2]);
-        const low = parseFloat(r[3]);
-        const close = parseFloat(r[4]);
-        if (isNaN(d) || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) continue;
-        // CanvasJS candlestick expects [open, high, low, close]
-        pts.push({ x: d, y: [open, high, low, close] });
-      }
-      // sort by date
-      pts.sort((a,b) => a.x - b.x);
-      return pts;
-    }
+        async function fetchText(url) {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
+            return await res.text();
+        }
 
-    function buildRangePoints(rows) {
-      // expected: Date,High,Low  (program writes Date,High,Low)
-      const pts = [];
-      for (const r of rows) {
-        if (r.length < 3) continue;
-        const d = new Date(r[0]);
-        const high = parseFloat(r[1]);
-        const low = parseFloat(r[2]);
-        if (isNaN(d) || isNaN(high) || isNaN(low)) continue;
-        // CanvasJS range area expects [low, high]
-        pts.push({ x: d, y: [low, high] });
-      }
-      pts.sort((a,b) => a.x - b.x);
-      return pts;
-    }
+        function buildCandlestickPoints(rows) {
+            // expected: Date,Open,High,Low,Close
+            const pts = [];
+            for (const r of rows) {
+                if (r.length < 5) continue;
+                const d = parseIsoDate(r[0]);
+                const open = parseFloat(r[1]);
+                const high = parseFloat(r[2]);
+                const low = parseFloat(r[3]);
+                const close = parseFloat(r[4]);
+                if (!d || isNaN(d.getTime()) || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) continue;
+                // CanvasJS candlestick expects [open, high, low, close]
+                pts.push({ x: d, y: [open, high, low, close] });
+            }
+            // sort by date
+            pts.sort((a, b) => a.x - b.x);
+            return pts;
+        }
 
-    function renderChart(stock, histPoints, predPoints) {
-      const chart = new CanvasJS.Chart("chartContainer", {
-        animationEnabled: true,
-        theme: "light2",
-        title: { text: `Stock: ${stock}` },
-        axisX: {
-          valueFormatString: "YYYY-MM-DD",
-          intervalType: "day",
-          labelAngle: -45
-        },
-        axisY: {
-          prefix: "$",
-          includeZero: false
-        },
-        toolTip: { shared: true, content: toolTipFormatter },
-        legend: {
-          cursor: "pointer",
-          itemclick: function (e) {
-            if (typeof (e.dataSeries.visible) === "undefined" || e.dataSeries.visible) e.dataSeries.visible = false;
-            else e.dataSeries.visible = true;
+        function buildRangePoints(rows) {
+            // expected: Date,High,Low  (program writes Date,High,Low)
+            const pts = [];
+            for (const r of rows) {
+                if (r.length < 3) continue;
+                const d = parseIsoDate(r[0]);
+                const high = parseFloat(r[1]);
+                const low = parseFloat(r[2]);
+                if (!d || isNaN(d.getTime()) || isNaN(high) || isNaN(low)) continue;
+                // CanvasJS range area expects [low, high]
+                pts.push({ x: d, y: [low, high] });
+            }
+            pts.sort((a, b) => a.x - b.x);
+            return pts;
+        }
+
+        function computeYRange(histPoints, predPoints) {
+            let minY = Number.POSITIVE_INFINITY;
+            let maxY = Number.NEGATIVE_INFINITY;
+            for (const p of histPoints) {
+                if (Array.isArray(p.y) && p.y.length >= 2) {
+                    minY = Math.min(minY, p.y[0]);
+                    maxY = Math.max(maxY, p.y[1]);
+                }
+            }
+            for (const p of predPoints) {
+                if (Array.isArray(p.y)) {
+                    for (const v of p.y) {
+                        if (!isNaN(v)) {
+                            minY = Math.min(minY, v);
+                            maxY = Math.max(maxY, v);
+                        }
+                    }
+                }
+            }
+            if (!isFinite(minY) || !isFinite(maxY)) return null;
+            return { minY, maxY };
+        }
+
+        function renderChart(stock, histPoints, predPoints, forecast) {
+            const yRange = computeYRange(histPoints, predPoints);
+            const stripLines = [];
+            if (forecast && yRange) {
+                const { minY, maxY } = yRange;
+                const addIfVisible = (value, color, label) => {
+                    if (!value || isNaN(value)) return;
+                    if (value < minY || value > maxY) return; // don't show if outside chart
+                    stripLines.push({ value: value, thickness: 2, color: color, label: label, labelFontColor: color });
+                };
+                addIfVisible(forecast.High, "rgba(0,128,0,0.9)", "Forecast High");
+                addIfVisible(forecast.Median, "rgba(0,0,0,0.9)", "Forecast Median");
+                addIfVisible(forecast.Low, "rgba(255,0,0,0.9)", "Forecast Low");
+            }
+
+            const chart = new CanvasJS.Chart("chartContainer", {
+                animationEnabled: true,
+                theme: "light2",
+                title: { text: `Stock: ${stock}` },
+                axisX: {
+                    valueFormatString: "YYYY-MM-DD",
+                    intervalType: "day",
+                    labelAngle: -45
+                },
+                axisY: Object.assign({ prefix: "$", includeZero: false }, (stripLines.length ? { stripLines } : {})),
+                toolTip: { shared: true, content: toolTipFormatter },
+                legend: {
+                    cursor: "pointer",
+                    itemclick: function (e) {
+                        if (typeof (e.dataSeries.visible) === "undefined" || e.dataSeries.visible) e.dataSeries.visible = false;
+                        else e.dataSeries.visible = true;
+                        chart.render();
+                    }
+                },
+                data: [
+                    {
+                        type: "rangeArea",
+                        showInLegend: true,
+                        name: "Historical Low/High",
+                        color: "rgba(30,144,255,0.18)",
+                        markerSize: 0,
+                        dataPoints: histPoints
+                    },
+                    {
+                        type: "candlestick",
+                        showInLegend: true,
+                        name: "Predicted (O,H,L,C)",
+                        risingColor: "green",
+                        fallingColor: "red",
+                        dataPoints: predPoints
+                    }
+                ]
+            });
             chart.render();
-          }
-        },
-        data: [
-          {
-            type: "rangeArea",
-            showInLegend: true,
-            name: "Historical Low/High",
-            color: "rgba(30,144,255,0.18)",
-            markerSize: 0,
-            dataPoints: histPoints
-          },
-          {
-            type: "candlestick",
-            showInLegend: true,
-            name: "Predicted (O,H,L,C)",
-            risingColor: "green",
-            fallingColor: "red",
-            dataPoints: predPoints
-          }
-        ]
-      });
-      chart.render();
-    }
-
-    function toolTipFormatter(e) {
-      // shared tooltip: show range area and candlestick values when available
-      let content = `<strong>${CanvasJS.formatDate(e.entries[0].dataPoint.x, "YYYY-MM-DD")}</strong><br/>`;
-      for (const entry of e.entries) {
-        const dsName = entry.dataSeries.name;
-        if (entry.dataPoint.y instanceof Array) {
-          if (entry.dataSeries.type === "candlestick") {
-            const o = entry.dataPoint.y[0].toFixed(2), h = entry.dataPoint.y[1].toFixed(2),
-                  l = entry.dataPoint.y[2].toFixed(2), c = entry.dataPoint.y[3].toFixed(2);
-            content += `${dsName}: O ${o} H ${h} L ${l} C ${c}<br/>`;
-          } else {
-            // rangeArea
-            const low = entry.dataPoint.y[0].toFixed(2), high = entry.dataPoint.y[1].toFixed(2);
-            content += `${dsName}: Low ${low} High ${high}<br/>`;
-          }
-        }
-      }
-      return content;
-    }
-
-    async function loadForStock(stock) {
-      const status = document.getElementById('status');
-      const chartContainer = document.getElementById('chartContainer');
-      chartContainer.innerHTML = 'Loading...';
-      status.textContent = '';
-
-      const dataUrl = `${encodeURIComponent(stock)}data.csv`;
-      const histUrl = `${encodeURIComponent(stock)}hist.csv`;
-
-      try {
-        const [dataText, histText] = await Promise.all([
-          fetchText(dataUrl),
-          fetchText(histUrl)
-        ]);
-
-        const predRows = parseCsv(dataText);
-        const histRows = parseCsv(histText);
-
-        const predPoints = buildCandlestickPoints(predRows);
-        const histPoints = buildRangePoints(histRows);
-
-        if (predPoints.length === 0 && histPoints.length === 0) {
-          chartContainer.innerHTML = 'No valid data found in CSVs.';
-          status.textContent = `Tried: ${dataUrl}, ${histUrl}`;
-          return;
         }
 
-        renderChart(stock, histPoints, predPoints);
-        status.textContent = `Loaded: ${dataUrl} (${predPoints.length} rows), ${histUrl} (${histPoints.length} rows)`;
-      } catch (err) {
-        chartContainer.innerHTML = 'Error loading CSVs. See status below.';
-        status.textContent = err.message;
-      }
-    }
+        function toolTipFormatter(e) {
+            // shared tooltip: show range area and candlestick values when available
+            let content = `<strong>${CanvasJS.formatDate(e.entries[0].dataPoint.x, "YYYY-MM-DD")}</strong><br/>`;
+            for (const entry of e.entries) {
+                const dsName = entry.dataSeries.name;
+                if (entry.dataPoint.y instanceof Array) {
+                    if (entry.dataSeries.type === "candlestick") {
+                        const o = entry.dataPoint.y[0].toFixed(2), h = entry.dataPoint.y[1].toFixed(2),
+                            l = entry.dataPoint.y[2].toFixed(2), c = entry.dataPoint.y[3].toFixed(2);
+                        content += `${dsName}: O ${o} H ${h} L ${l} C ${c}<br/>`;
+                    } else {
+                        // rangeArea
+                        const low = entry.dataPoint.y[0].toFixed(2), high = entry.dataPoint.y[1].toFixed(2);
+                        content += `${dsName}: Low ${low} High ${high}<br/>`;
+                    }
+                }
+            }
+            return content;
+        }
 
-    // Wire up UI
-    (function init() {
-      const stockInput = document.getElementById('stockInput');
-      const loadBtn = document.getElementById('loadBtn');
-      const openNewTabBtn = document.getElementById('openNewTabBtn');
+        async function loadForStock(stock) {
+            const status = document.getElementById('status');
+            const chartContainer = document.getElementById('chartContainer');
+            chartContainer.innerHTML = 'Loading...';
+            status.textContent = '';
 
-      // load from query string if present
-      const qStock = getQueryParam('stock');
-      if (qStock) {
-        stockInput.value = qStock.toUpperCase();
-        loadForStock(stockInput.value);
-      }
+            const dataUrl = `${encodeURIComponent(stock)}data.csv`;
+            const histUrl = `${encodeURIComponent(stock)}hist.csv`;
+            const forecastUrl = `${encodeURIComponent(stock)}_PHPforecast.txt`;
 
-      loadBtn.addEventListener('click', () => {
-        const s = (stockInput.value || '').trim().toUpperCase();
-        if (!s) return alert('Enter a stock symbol first.');
-        loadForStock(s);
-      });
+            try {
+                const [dataText, histText] = await Promise.all([
+                    fetchText(dataUrl),
+                    fetchText(histUrl)
+                ]);
 
-      openNewTabBtn.addEventListener('click', () => {
-        const s = (stockInput.value || '').trim().toUpperCase();
-        if (!s) return alert('Enter a stock symbol first.');
-        const url = `${location.pathname}?stock=${encodeURIComponent(s)}`;
-        window.open(url, '_blank');
-      });
-    })();
-  </script>
+                // try forecast but it's optional
+                let forecast = null;
+                try {
+                    const fText = await fetchText(forecastUrl);
+                    const fLines = fText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+                    if (fLines.length >= 2) {
+                        const parts = fLines[1].split(',').map(p => p.trim());
+                        const h = parseFloat(parts[0]);
+                        const m = parseFloat(parts[1]);
+                        const l = parseFloat(parts[2]);
+                        forecast = { High: isNaN(h) ? 0 : h, Median: isNaN(m) ? 0 : m, Low: isNaN(l) ? 0 : l };
+                    }
+                } catch (e) {
+                    // forecast file missing or parse error - ignore
+                    forecast = null;
+                }
+
+                const predRows = parseCsv(dataText);
+                const histRows = parseCsv(histText);
+
+                const predPoints = buildCandlestickPoints(predRows);
+                const histPoints = buildRangePoints(histRows);
+
+                if (predPoints.length === 0 && histPoints.length === 0) {
+                    chartContainer.innerHTML = 'No valid data found in CSVs.';
+                    status.textContent = `Tried: ${dataUrl}, ${histUrl}`;
+                    return;
+                }
+
+                renderChart(stock, histPoints, predPoints, forecast);
+                status.textContent = `Loaded: ${dataUrl} (${predPoints.length} rows), ${histUrl} (${histPoints.length} rows)` + (forecast ? `; Forecast H/M/L=${forecast.High}/${forecast.Median}/${forecast.Low}` : '');
+            } catch (err) {
+                chartContainer.innerHTML = 'Error loading CSVs. See status below.';
+                status.textContent = err.message;
+            }
+        }
+
+        // Wire up UI
+        (function init() {
+            const stockInput = document.getElementById('stockInput');
+            const loadBtn = document.getElementById('loadBtn');
+            const openNewTabBtn = document.getElementById('openNewTabBtn');
+
+            // load from query string if present
+            const qStock = getQueryParam('stock');
+            if (qStock) {
+                stockInput.value = qStock.toUpperCase();
+                loadForStock(stockInput.value);
+            }
+
+            loadBtn.addEventListener('click', () => {
+                const s = (stockInput.value || '').trim().toUpperCase();
+                if (!s) return alert('Enter a stock symbol first.');
+                loadForStock(s);
+            });
+
+            openNewTabBtn.addEventListener('click', () => {
+                const s = (stockInput.value || '').trim().toUpperCase();
+                if (!s) return alert('Enter a stock symbol first.');
+                const url = `${location.pathname}?stock=${encodeURIComponent(s)}`;
+                window.open(url, '_blank');
+            });
+        })();
+    </script>
 </body>
 </html>
