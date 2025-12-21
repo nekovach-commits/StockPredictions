@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Stock Viewer - CanvasJS</title>
+    <title>Stock Viewer - Chart.js</title>
     <style>
         body {
             font-family: Segoe UI, Roboto, Arial, sans-serif;
@@ -36,11 +36,17 @@
             padding: 6px 10px;
             font-size: 1rem;
         }
+
+        canvas {
+            width: 100% !important;
+            height: 640px !important;
+        }
     </style>
-    <script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@3.3.0/dist/chartjs-chart-financial.min.js"></script>
 </head>
 <body>
-    <h2>Stock Viewer (CanvasJS)</h2>
+    <h2>Stock Viewer (Chart.js)</h2>
     <div id="controls">
         <label for="stockInput">Stock symbol:</label>
         <input id="stockInput" type="text" placeholder="e.g. TSLA" />
@@ -49,7 +55,7 @@
         <div class="hint">Tip: you can also load this page with <code>?stock=SYMBOL</code> (example: <code>index.html?stock=TSLA</code>).</div>
     </div>
 
-    <div id="chartContainer">Loading...</div>
+    <div id="chartContainer"><canvas id="chartCanvas"></canvas></div>
     <div id="status" class="hint"></div>
 
     <script>
@@ -89,7 +95,7 @@
         }
 
         function buildCandlestickPoints(rows) {
-            // expected: Date,Open,High,Low,Close
+            // returns array of {x: Date, o:, h:, l:, c:}
             const pts = [];
             for (const r of rows) {
                 if (r.length < 5) continue;
@@ -99,133 +105,149 @@
                 const low = parseFloat(r[3]);
                 const close = parseFloat(r[4]);
                 if (!d || isNaN(d.getTime()) || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) continue;
-                // CanvasJS candlestick expects [open, high, low, close]
-                pts.push({ x: d, y: [open, high, low, close] });
+                pts.push({ x: d.getTime(), o: open, h: high, l: low, c: close });
             }
-            // sort by date
             pts.sort((a, b) => a.x - b.x);
             return pts;
         }
 
         function buildRangePoints(rows) {
-            // expected: Date,High,Low  (program writes Date,High,Low)
-            const pts = [];
+            // returns two arrays: lows and highs as {x: timestamp, y: value}
+            const lows = [];
+            const highs = [];
             for (const r of rows) {
                 if (r.length < 3) continue;
                 const d = parseIsoDate(r[0]);
                 const high = parseFloat(r[1]);
                 const low = parseFloat(r[2]);
                 if (!d || isNaN(d.getTime()) || isNaN(high) || isNaN(low)) continue;
-                // CanvasJS range area expects [low, high]
-                pts.push({ x: d, y: [low, high] });
+                const t = d.getTime();
+                lows.push({ x: t, y: low });
+                highs.push({ x: t, y: high });
             }
-            pts.sort((a, b) => a.x - b.x);
-            return pts;
+            lows.sort((a, b) => a.x - b.x);
+            highs.sort((a, b) => a.x - b.x);
+            return { lows, highs };
         }
 
-        function computeYRange(histPoints, predPoints) {
+        function computeYRangeFromData(lows, highs, candlesticks) {
             let minY = Number.POSITIVE_INFINITY;
             let maxY = Number.NEGATIVE_INFINITY;
-            for (const p of histPoints) {
-                if (Array.isArray(p.y) && p.y.length >= 2) {
-                    minY = Math.min(minY, p.y[0]);
-                    maxY = Math.max(maxY, p.y[1]);
-                }
-            }
-            for (const p of predPoints) {
-                if (Array.isArray(p.y)) {
-                    for (const v of p.y) {
-                        if (!isNaN(v)) {
-                            minY = Math.min(minY, v);
-                            maxY = Math.max(maxY, v);
-                        }
-                    }
-                }
+            for (const p of lows) { if (!isNaN(p.y)) minY = Math.min(minY, p.y); }
+            for (const p of highs) { if (!isNaN(p.y)) maxY = Math.max(maxY, p.y); }
+            for (const c of candlesticks) {
+                if (!isNaN(c.l)) minY = Math.min(minY, c.l);
+                if (!isNaN(c.h)) maxY = Math.max(maxY, c.h);
             }
             if (!isFinite(minY) || !isFinite(maxY)) return null;
             return { minY, maxY };
         }
 
-        function renderChart(stock, histPoints, predPoints, forecast) {
-            const yRange = computeYRange(histPoints, predPoints);
-            const stripLines = [];
+        let chartInstance = null;
+
+        function renderChart(stock, histRanges, candlesticks, forecast) {
+            const ctx = document.getElementById('chartCanvas').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            const lows = histRanges.lows;
+            const highs = histRanges.highs;
+            const yRange = computeYRangeFromData(lows, highs, candlesticks);
+
+            // compute x domain for optional horizontal lines
+            const allX = [];
+            lows.forEach(p => allX.push(p.x));
+            highs.forEach(p => allX.push(p.x));
+            candlesticks.forEach(c => allX.push(c.x));
+            const minX = Math.min(...allX);
+            const maxX = Math.max(...allX);
+
+            const datasets = [];
+
+            // historical low (plotted first)
+            datasets.push({
+                label: 'Historical Low',
+                data: lows,
+                borderColor: 'rgba(30,144,255,0.0)',
+                backgroundColor: 'rgba(30,144,255,0.0)',
+                pointRadius: 0,
+                borderWidth: 0,
+                fill: false,
+                showLine: true
+            });
+
+            // historical high (plotted second) - fill to previous to create area
+            datasets.push({
+                label: 'Historical High',
+                data: highs,
+                borderColor: 'rgba(30,144,255,0.0)',
+                backgroundColor: 'rgba(30,144,255,0.18)',
+                pointRadius: 0,
+                borderWidth: 0,
+                fill: '-1',
+                showLine: true
+            });
+
+            // candlestick series using financial plugin
+            datasets.push({
+                label: 'Predicted (O,H,L,C)',
+                type: 'candlestick',
+                data: candlesticks,
+                borderColor: 'rgba(0,0,0,0.8)'
+            });
+
+            // forecast horizontal lines as line datasets spanning minX..maxX
             if (forecast && yRange) {
                 const { minY, maxY } = yRange;
                 const addIfVisible = (value, color, label) => {
                     if (!value || isNaN(value)) return;
-                    if (value < minY || value > maxY) return; // don't show if outside chart
-                    stripLines.push({ value: value, thickness: 2, color: color, label: label, labelFontColor: color });
+                    if (value < minY || value > maxY) return;
+                    datasets.push({
+                        label: label,
+                        data: [{ x: minX, y: value }, { x: maxX, y: value }],
+                        borderColor: color,
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        type: 'line',
+                        fill: false,
+                        borderDash: [6, 4]
+                    });
                 };
-                addIfVisible(forecast.High, "rgba(0,128,0,0.9)", "Forecast High");
-                addIfVisible(forecast.Median, "rgba(0,0,0,0.9)", "Forecast Median");
-                addIfVisible(forecast.Low, "rgba(255,0,0,0.9)", "Forecast Low");
+                addIfVisible(forecast.High, 'rgba(0,128,0,0.9)', 'Forecast High');
+                addIfVisible(forecast.Median, 'rgba(0,0,0,0.9)', 'Forecast Median');
+                addIfVisible(forecast.Low, 'rgba(255,0,0,0.9)', 'Forecast Low');
             }
 
-            const chart = new CanvasJS.Chart("chartContainer", {
-                animationEnabled: true,
-                theme: "light2",
-                title: { text: `Stock: ${stock}` },
-                axisX: {
-                    valueFormatString: "YYYY-MM-DD",
-                    intervalType: "day",
-                    labelAngle: -45
-                },
-                axisY: Object.assign({ prefix: "$", includeZero: false }, (stripLines.length ? { stripLines } : {})),
-                toolTip: { shared: true, content: toolTipFormatter },
-                legend: {
-                    cursor: "pointer",
-                    itemclick: function (e) {
-                        if (typeof (e.dataSeries.visible) === "undefined" || e.dataSeries.visible) e.dataSeries.visible = false;
-                        else e.dataSeries.visible = true;
-                        chart.render();
-                    }
-                },
-                data: [
-                    {
-                        type: "rangeArea",
-                        showInLegend: true,
-                        name: "Historical Low/High",
-                        color: "rgba(30,144,255,0.18)",
-                        markerSize: 0,
-                        dataPoints: histPoints
+            chartInstance = new Chart(ctx, {
+                data: { datasets },
+                options: {
+                    interaction: { mode: 'nearest', intersect: false },
+                    plugins: {
+                        legend: { display: true }
                     },
-                    {
-                        type: "candlestick",
-                        showInLegend: true,
-                        name: "Predicted (O,H,L,C)",
-                        risingColor: "green",
-                        fallingColor: "red",
-                        dataPoints: predPoints
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'day' },
+                            adapters: { date: { locale: undefined } }
+                        },
+                        y: {
+                            ticks: { callback: (v) => '$' + v },
+                            beginAtZero: false
+                        }
                     }
-                ]
+                }
             });
-            chart.render();
         }
 
         function toolTipFormatter(e) {
-            // shared tooltip: show range area and candlestick values when available
-            let content = `<strong>${CanvasJS.formatDate(e.entries[0].dataPoint.x, "YYYY-MM-DD")}</strong><br/>`;
-            for (const entry of e.entries) {
-                const dsName = entry.dataSeries.name;
-                if (entry.dataPoint.y instanceof Array) {
-                    if (entry.dataSeries.type === "candlestick") {
-                        const o = entry.dataPoint.y[0].toFixed(2), h = entry.dataPoint.y[1].toFixed(2),
-                            l = entry.dataPoint.y[2].toFixed(2), c = entry.dataPoint.y[3].toFixed(2);
-                        content += `${dsName}: O ${o} H ${h} L ${l} C ${c}<br/>`;
-                    } else {
-                        // rangeArea
-                        const low = entry.dataPoint.y[0].toFixed(2), high = entry.dataPoint.y[1].toFixed(2);
-                        content += `${dsName}: Low ${low} High ${high}<br/>`;
-                    }
-                }
-            }
-            return content;
+            // Chart.js tooltips are configured via callbacks; we rely on defaults here.
+            return '';
         }
 
         async function loadForStock(stock) {
             const status = document.getElementById('status');
             const chartContainer = document.getElementById('chartContainer');
-            chartContainer.innerHTML = 'Loading...';
+            chartContainer.innerHTML = '<canvas id="chartCanvas"></canvas>';
             status.textContent = '';
 
             const dataUrl = `${encodeURIComponent(stock)}data.csv`;
@@ -251,24 +273,23 @@
                         forecast = { High: isNaN(h) ? 0 : h, Median: isNaN(m) ? 0 : m, Low: isNaN(l) ? 0 : l };
                     }
                 } catch (e) {
-                    // forecast file missing or parse error - ignore
                     forecast = null;
                 }
 
                 const predRows = parseCsv(dataText);
                 const histRows = parseCsv(histText);
 
-                const predPoints = buildCandlestickPoints(predRows);
-                const histPoints = buildRangePoints(histRows);
+                const candlesticks = buildCandlestickPoints(predRows);
+                const histRanges = buildRangePoints(histRows);
 
-                if (predPoints.length === 0 && histPoints.length === 0) {
+                if (candlesticks.length === 0 && histRanges.lows.length === 0) {
                     chartContainer.innerHTML = 'No valid data found in CSVs.';
                     status.textContent = `Tried: ${dataUrl}, ${histUrl}`;
                     return;
                 }
 
-                renderChart(stock, histPoints, predPoints, forecast);
-                status.textContent = `Loaded: ${dataUrl} (${predPoints.length} rows), ${histUrl} (${histPoints.length} rows)` + (forecast ? `; Forecast H/M/L=${forecast.High}/${forecast.Median}/${forecast.Low}` : '');
+                renderChart(stock, histRanges, candlesticks, forecast);
+                status.textContent = `Loaded: ${dataUrl} (${candlesticks.length} rows), ${histUrl} (${histRanges.lows.length} rows)` + (forecast ? `; Forecast H/M/L=${forecast.High}/${forecast.Median}/${forecast.Low}` : '');
             } catch (err) {
                 chartContainer.innerHTML = 'Error loading CSVs. See status below.';
                 status.textContent = err.message;
