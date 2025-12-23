@@ -3,52 +3,20 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Stock Viewer - Chart.js</title>
+    <title>Stock Viewer - Plotly</title>
     <style>
-        body {
-            font-family: Segoe UI, Roboto, Arial, sans-serif;
-            margin: 16px;
-        }
-
-        #controls {
-            margin-bottom: 12px;
-        }
-
-        #chartContainer {
-            height: 640px;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .hint {
-            color: #444;
-            font-size: 0.95rem;
-            margin-top: 6px;
-        }
-
-        input[type="text"] {
-            padding: 6px;
-            font-size: 1rem;
-            width: 160px;
-        }
-
-        button {
-            padding: 6px 10px;
-            font-size: 1rem;
-        }
-
-        canvas {
-            width: 100% !important;
-            height: 640px !important;
-        }
+        body { font-family: Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+        #controls { margin-bottom: 12px; }
+        #chartContainer { height: 640px; max-width: 1200px; margin: 0 auto; }
+        .hint { color: #444; font-size: 0.95rem; margin-top: 6px; }
+        input[type="text"] { padding: 6px; font-size: 1rem; width: 160px; }
+        button { padding: 6px 10px; font-size: 1rem; }
+        #chart { width: 100%; height: 640px; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/dist/date-fns.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@3.3.0/dist/chartjs-chart-financial.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.20.0.min.js"></script>
 </head>
 <body>
-    <h2>Stock Viewer (Chart.js)</h2>
+    <h2>Stock Viewer (Plotly)</h2>
     <div id="controls">
         <label for="stockInput">Stock symbol:</label>
         <input id="stockInput" type="text" placeholder="e.g. TSLA" />
@@ -57,17 +25,15 @@
         <div class="hint">Tip: you can also load this page with <code>?stock=SYMBOL</code> (example: <code>index.html?stock=TSLA</code>).</div>
     </div>
 
-    <div id="chartContainer"><canvas id="chartCanvas"></canvas></div>
+    <div id="chartContainer"><div id="chart">Loading...</div></div>
     <div id="status" class="hint"></div>
 
     <script>
-        // Utility: get query param
         function getQueryParam(name) {
             const params = new URLSearchParams(window.location.search);
             return params.get(name);
         }
 
-        // Naive CSV parser for simple CSVs used by the app (no quoted commas expected)
         function parseCsv(text) {
             const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
             if (lines.length <= 1) return [];
@@ -79,15 +45,14 @@
             return rows;
         }
 
-        // Parse ISO date 'YYYY-MM-DD' reliably across browsers
         function parseIsoDate(s) {
             if (!s) return null;
             const m = s.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-            if (!m) return new Date(s); // fallback
+            if (!m) return s;
             const year = parseInt(m[1], 10);
-            const month = parseInt(m[2], 10) - 1;
-            const day = parseInt(m[3], 10);
-            return new Date(year, month, day);
+            const month = ('0' + m[2]).slice(-2);
+            const day = ('0' + m[3]).slice(-2);
+            return `${year}-${month}-${day}`; // Plotly accepts ISO date strings
         }
 
         async function fetchText(url) {
@@ -96,154 +61,110 @@
             return await res.text();
         }
 
-        function buildCandlestickPoints(rows) {
-            // returns array of {x: Date, o:, h:, l:, c:}
-            const pts = [];
+        function buildCandlestick(rows) {
+            const dates = [], open = [], high = [], low = [], close = [];
             for (const r of rows) {
                 if (r.length < 5) continue;
                 const d = parseIsoDate(r[0]);
-                const open = parseFloat(r[1]);
-                const high = parseFloat(r[2]);
-                const low = parseFloat(r[3]);
-                const close = parseFloat(r[4]);
-                if (!d || isNaN(d.getTime()) || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) continue;
-                pts.push({ x: d.getTime(), o: open, h: high, l: low, c: close });
+                const o = parseFloat(r[1]);
+                const h = parseFloat(r[2]);
+                const l = parseFloat(r[3]);
+                const c = parseFloat(r[4]);
+                if (!d || isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c)) continue;
+                dates.push(d);
+                open.push(o); high.push(h); low.push(l); close.push(c);
             }
-            pts.sort((a, b) => a.x - b.x);
-            return pts;
+            return { dates, open, high, low, close };
         }
 
-        function buildRangePoints(rows) {
-            // returns two arrays: lows and highs as {x: timestamp, y: value}
-            const lows = [];
-            const highs = [];
+        function buildRange(rows) {
+            const dates = [], highs = [], lows = [];
             for (const r of rows) {
                 if (r.length < 3) continue;
                 const d = parseIsoDate(r[0]);
-                const high = parseFloat(r[1]);
-                const low = parseFloat(r[2]);
-                if (!d || isNaN(d.getTime()) || isNaN(high) || isNaN(low)) continue;
-                const t = d.getTime();
-                lows.push({ x: t, y: low });
-                highs.push({ x: t, y: high });
+                const h = parseFloat(r[1]);
+                const l = parseFloat(r[2]);
+                if (!d || isNaN(h) || isNaN(l)) continue;
+                dates.push(d); highs.push(h); lows.push(l);
             }
-            lows.sort((a, b) => a.x - b.x);
-            highs.sort((a, b) => a.x - b.x);
-            return { lows, highs };
+            return { dates, highs, lows };
         }
 
-        function computeYRangeFromData(lows, highs, candlesticks) {
-            let minY = Number.POSITIVE_INFINITY;
-            let maxY = Number.NEGATIVE_INFINITY;
-            for (const p of lows) { if (!isNaN(p.y)) minY = Math.min(minY, p.y); }
-            for (const p of highs) { if (!isNaN(p.y)) maxY = Math.max(maxY, p.y); }
-            for (const c of candlesticks) {
-                if (!isNaN(c.l)) minY = Math.min(minY, c.l);
-                if (!isNaN(c.h)) maxY = Math.max(maxY, c.h);
+        function renderPlot(stock, histRange, candle, forecast) {
+            const traces = [];
+
+            // Historical range as filled area between low and high using two scatter traces and fill='tonexty'
+            if (histRange.dates.length > 0) {
+                traces.push({
+                    x: histRange.dates,
+                    y: histRange.lows,
+                    mode: 'lines',
+                    line: { width: 0 },
+                    hoverinfo: 'skip',
+                    showlegend: false
+                });
+                traces.push({
+                    x: histRange.dates,
+                    y: histRange.highs,
+                    mode: 'lines',
+                    line: { color: 'rgba(30,144,255,0.0)' , width: 0},
+                    fill: 'tonexty',
+                    fillcolor: 'rgba(30,144,255,0.18)',
+                    name: 'Historical Range',
+                    hovertemplate: 'High: %{y:.2f}<extra></extra>'
+                });
             }
-            if (!isFinite(minY) || !isFinite(maxY)) return null;
-            return { minY, maxY };
-        }
 
-        let chartInstance = null;
+            // Candlestick (predicted)
+            if (candle.dates.length > 0) {
+                traces.push({
+                    x: candle.dates,
+                    open: candle.open,
+                    high: candle.high,
+                    low: candle.low,
+                    close: candle.close,
+                    increasing: { line: { color: 'green' }, fillcolor: 'green' },
+                    decreasing: { line: { color: 'red' }, fillcolor: 'red' },
+                    type: 'candlestick',
+                    name: 'Predicted (O/H/L/C)'
+                });
+            }
 
-        function renderChart(stock, histRanges, candlesticks, forecast) {
-            const ctx = document.getElementById('chartCanvas').getContext('2d');
-            if (chartInstance) chartInstance.destroy();
+            const layout = {
+                title: `Stock: ${stock}`,
+                xaxis: { type: 'category' },
+                yaxis: { tickprefix: '$', autorange: true },
+                margin: { t: 40 }
+            };
 
-            const lows = histRanges.lows;
-            const highs = histRanges.highs;
-            const yRange = computeYRangeFromData(lows, highs, candlesticks);
+            // compute y-range to decide whether to show forecast lines
+            let minY = Number.POSITIVE_INFINITY, maxY = Number.NEGATIVE_INFINITY;
+            histRange.lows.forEach(v => { if (!isNaN(v)) minY = Math.min(minY, v); });
+            histRange.highs.forEach(v => { if (!isNaN(v)) maxY = Math.max(maxY, v); });
+            candle.low.forEach(v => { if (!isNaN(v)) minY = Math.min(minY, v); });
+            candle.high.forEach(v => { if (!isNaN(v)) maxY = Math.max(maxY, v); });
+            if (!isFinite(minY) || !isFinite(maxY)) { minY = null; maxY = null; }
 
-            // compute x domain for optional horizontal lines
-            const allX = [];
-            lows.forEach(p => allX.push(p.x));
-            highs.forEach(p => allX.push(p.x));
-            candlesticks.forEach(c => allX.push(c.x));
-            const minX = Math.min(...allX);
-            const maxX = Math.max(...allX);
-
-            const datasets = [];
-
-            // historical low (plotted first)
-            datasets.push({
-                label: 'Historical Low',
-                data: lows,
-                borderColor: 'rgba(30,144,255,0.0)',
-                backgroundColor: 'rgba(30,144,255,0.0)',
-                pointRadius: 0,
-                borderWidth: 0,
-                fill: false,
-                showLine: true
-            });
-
-            // historical high (plotted second) - fill to previous to create area
-            datasets.push({
-                label: 'Historical High',
-                data: highs,
-                borderColor: 'rgba(30,144,255,0.0)',
-                backgroundColor: 'rgba(30,144,255,0.18)',
-                pointRadius: 0,
-                borderWidth: 0,
-                fill: '-1',
-                showLine: true
-            });
-
-            // candlestick series using financial plugin
-            datasets.push({
-                label: 'Predicted (O,H,L,C)',
-                type: 'candlestick',
-                data: candlesticks,
-                borderColor: 'rgba(0,0,0,0.8)'
-            });
-
-            // forecast horizontal lines as line datasets spanning minX..maxX
-            if (forecast && yRange) {
-                const { minY, maxY } = yRange;
-                const addIfVisible = (value, color, label) => {
+            const shapes = [];
+            if (forecast && minY !== null) {
+                const addShape = (value, color, name) => {
                     if (!value || isNaN(value)) return;
                     if (value < minY || value > maxY) return;
-                    datasets.push({
-                        label: label,
-                        data: [{ x: minX, y: value }, { x: maxX, y: value }],
-                        borderColor: color,
-                        borderWidth: 1.5,
-                        pointRadius: 0,
-                        type: 'line',
-                        fill: false,
-                        borderDash: [6, 4]
-                    });
+                    shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: value, y1: value, line: { color: color, width: 2, dash: 'dash' } });
                 };
-                addIfVisible(forecast.High, 'rgba(0,128,0,0.9)', 'Forecast High');
-                addIfVisible(forecast.Median, 'rgba(0,0,0,0.9)', 'Forecast Median');
-                addIfVisible(forecast.Low, 'rgba(255,0,0,0.9)', 'Forecast Low');
+                addShape(forecast.High, 'green', 'Forecast High');
+                addShape(forecast.Median, 'black', 'Forecast Median');
+                addShape(forecast.Low, 'red', 'Forecast Low');
             }
+            if (shapes.length) layout.shapes = shapes;
 
-            chartInstance = new Chart(ctx, {
-                data: { datasets },
-                options: {
-                    interaction: { mode: 'nearest', intersect: false },
-                    plugins: {
-                        legend: { display: true }
-                    },
-                    scales: {
-                        x: {
-                            type: 'time',
-                            time: { unit: 'day' }
-                        },
-                        y: {
-                            ticks: { callback: (v) => '$' + v },
-                            beginAtZero: false
-                        }
-                    }
-                }
-            });
+            Plotly.newPlot('chart', traces, layout, {responsive: true});
         }
 
         async function loadForStock(stock) {
             const status = document.getElementById('status');
-            const chartContainer = document.getElementById('chartContainer');
-            chartContainer.innerHTML = '<canvas id="chartCanvas"></canvas>';
+            const chart = document.getElementById('chart');
+            chart.innerHTML = 'Loading...';
             status.textContent = '';
 
             const dataUrl = `${encodeURIComponent(stock)}data.csv`;
@@ -251,12 +172,9 @@
             const forecastUrl = `${encodeURIComponent(stock)}_PHPforecast.txt`;
 
             try {
-                const [dataText, histText] = await Promise.all([
-                    fetchText(dataUrl),
-                    fetchText(histUrl)
-                ]);
+                const [dataText, histText] = await Promise.all([fetchText(dataUrl), fetchText(histUrl)]);
 
-                // try forecast but it's optional
+                // try forecast optionally
                 let forecast = null;
                 try {
                     const fText = await fetchText(forecastUrl);
@@ -268,55 +186,36 @@
                         const l = parseFloat(parts[2]);
                         forecast = { High: isNaN(h) ? 0 : h, Median: isNaN(m) ? 0 : m, Low: isNaN(l) ? 0 : l };
                     }
-                } catch (e) {
-                    forecast = null;
-                }
+                } catch (e) { forecast = null; }
 
                 const predRows = parseCsv(dataText);
                 const histRows = parseCsv(histText);
 
-                const candlesticks = buildCandlestickPoints(predRows);
-                const histRanges = buildRangePoints(histRows);
+                const candle = buildCandlestick(predRows);
+                const histRange = buildRange(histRows);
 
-                if (candlesticks.length === 0 && histRanges.lows.length === 0) {
-                    chartContainer.innerHTML = 'No valid data found in CSVs.';
+                if (candle.dates.length === 0 && histRange.dates.length === 0) {
+                    chart.innerHTML = 'No valid data found in CSVs.';
                     status.textContent = `Tried: ${dataUrl}, ${histUrl}`;
                     return;
                 }
 
-                renderChart(stock, histRanges, candlesticks, forecast);
-                status.textContent = `Loaded: ${dataUrl} (${candlesticks.length} rows), ${histUrl} (${histRanges.lows.length} rows)` + (forecast ? `; Forecast H/M/L=${forecast.High}/${forecast.Median}/${forecast.Low}` : '');
+                renderPlot(stock, histRange, candle, forecast);
+                status.textContent = `Loaded: ${dataUrl} (${candle.dates.length} rows), ${histUrl} (${histRange.dates.length} rows)` + (forecast ? `; Forecast H/M/L=${forecast.High}/${forecast.Median}/${forecast.Low}` : '');
             } catch (err) {
-                chartContainer.innerHTML = 'Error loading CSVs. See status below.';
+                chart.innerHTML = 'Error loading CSVs. See Status below.';
                 status.textContent = err.message;
             }
         }
 
-        // Wire up UI
         (function init() {
             const stockInput = document.getElementById('stockInput');
             const loadBtn = document.getElementById('loadBtn');
             const openNewTabBtn = document.getElementById('openNewTabBtn');
-
-            // load from query string if present
             const qStock = getQueryParam('stock');
-            if (qStock) {
-                stockInput.value = qStock.toUpperCase();
-                loadForStock(stockInput.value);
-            }
-
-            loadBtn.addEventListener('click', () => {
-                const s = (stockInput.value || '').trim().toUpperCase();
-                if (!s) return alert('Enter a stock symbol first.');
-                loadForStock(s);
-            });
-
-            openNewTabBtn.addEventListener('click', () => {
-                const s = (stockInput.value || '').trim().toUpperCase();
-                if (!s) return alert('Enter a stock symbol first.');
-                const url = `${location.pathname}?stock=${encodeURIComponent(s)}`;
-                window.open(url, '_blank');
-            });
+            if (qStock) { stockInput.value = qStock.toUpperCase(); loadForStock(stockInput.value); }
+            loadBtn.addEventListener('click', () => { const s = (stockInput.value||'').trim().toUpperCase(); if (!s) return alert('Enter a stock symbol first.'); loadForStock(s); });
+            openNewTabBtn.addEventListener('click', () => { const s = (stockInput.value||'').trim().toUpperCase(); if (!s) return alert('Enter a stock symbol first.'); window.open(`${location.pathname}?stock=${encodeURIComponent(s)}`, '_blank'); });
         })();
     </script>
 </body>
