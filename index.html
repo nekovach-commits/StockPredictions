@@ -132,7 +132,7 @@
 
             const layout = {
                 title: `Stock: ${stock}`,
-                xaxis: { type: 'category' },
+                xaxis: { type: 'date', tickformat: '%m-%d', tickangle: -45 },
                 yaxis: { tickprefix: '$', autorange: true },
                 margin: { t: 40 }
             };
@@ -146,17 +146,20 @@
             if (!isFinite(minY) || !isFinite(maxY)) { minY = null; maxY = null; }
 
             const shapes = [];
+            const annotations = [];
             if (forecast && minY !== null) {
-                const addShape = (value, color, name) => {
+                const addShape = (value, color, text) => {
                     if (!value || isNaN(value)) return;
                     if (value < minY || value > maxY) return;
-                    shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: value, y1: value, line: { color: color, width: 2, dash: 'dash' } });
+                    shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: value, y1: value, line: { color: color, width: 2, dash: 'dash' } });
+                    annotations.push({ xref: 'paper', x: 1.01, y: value, xanchor: 'left', yanchor: 'middle', text: `${text}: $${value.toFixed(2)}`, showarrow: false, font: { color: color } });
                 };
                 addShape(forecast.High, 'green', 'Forecast High');
                 addShape(forecast.Median, 'black', 'Forecast Median');
                 addShape(forecast.Low, 'red', 'Forecast Low');
             }
             if (shapes.length) layout.shapes = shapes;
+            if (annotations.length) layout.annotations = annotations;
 
             Plotly.newPlot('chart', traces, layout, {responsive: true});
         }
