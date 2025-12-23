@@ -130,9 +130,25 @@
                 });
             }
 
+            // compute earliest date for tick0 so daily ticks align
+            const allDates = [].concat(histRange.dates || [], candle.dates || []).filter(d => d);
+            let tick0 = null;
+            if (allDates.length > 0) {
+                const ms = allDates.map(d => new Date(d).getTime());
+                tick0 = Math.min.apply(null, ms);
+            }
+
             const layout = {
                 title: `Stock: ${stock}`,
-                xaxis: { type: 'date', tickformat: '%m-%d', tickangle: -45 },
+                xaxis: {
+                    type: 'date',
+                    tickformat: '%m-%d',
+                    tickangle: -45,
+                    // force daily ticks
+                    dtick: 24 * 3600 * 1000,
+                    tick0: tick0,
+                    rangeslider: { visible: false }
+                },
                 yaxis: { tickprefix: '$', autorange: true },
                 margin: { t: 40 }
             };
