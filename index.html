@@ -19,21 +19,14 @@
     <h2>Stock Viewer (Plotly)</h2>
     <div id="controls">
         <label for="stockInput">Stock symbol:</label>
-        <input id="stockInput" type="text" placeholder="e.g. TSLA" />
+        <input id="stockInput" type="text" value="TSLA" />
         <button id="loadBtn">Load</button>
-        <button id="openNewTabBtn">Open ?stock URL</button>
-        <div class="hint">Tip: you can also load this page with <code>?stock=SYMBOL</code> (example: <code>index.html?stock=TSLA</code>).</div>
     </div>
 
     <div id="chartContainer"><div id="chart">Loading...</div></div>
     <div id="status" class="hint"></div>
 
     <script>
-        function getQueryParam(name) {
-            const params = new URLSearchParams(window.location.search);
-            return params.get(name);
-        }
-
         function parseCsv(text) {
             const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
             if (lines.length <= 1) return [];
@@ -93,44 +86,15 @@
         function renderPlot(stock, histRange, candle, forecast) {
             const traces = [];
 
-            // Historical range as filled area between low and high using two scatter traces and fill='tonexty'
             if (histRange.dates.length > 0) {
-                traces.push({
-                    x: histRange.dates,
-                    y: histRange.lows,
-                    mode: 'lines',
-                    line: { width: 0 },
-                    hoverinfo: 'skip',
-                    showlegend: false
-                });
-                traces.push({
-                    x: histRange.dates,
-                    y: histRange.highs,
-                    mode: 'lines',
-                    line: { color: 'rgba(30,144,255,0.0)' , width: 0},
-                    fill: 'tonexty',
-                    fillcolor: 'rgba(30,144,255,0.18)',
-                    name: 'Historical Range',
-                    hovertemplate: 'High: %{y:.2f}<extra></extra>'
-                });
+                traces.push({ x: histRange.dates, y: histRange.lows, mode: 'lines', line: { width: 0 }, hoverinfo: 'skip', showlegend: false });
+                traces.push({ x: histRange.dates, y: histRange.highs, mode: 'lines', line: { color: 'rgba(30,144,255,0.0)', width: 0 }, fill: 'tonexty', fillcolor: 'rgba(30,144,255,0.18)', name: 'Historical Range', hovertemplate: 'High: %{y:.2f}<extra></extra>' });
             }
 
-            // Candlestick (predicted)
             if (candle.dates.length > 0) {
-                traces.push({
-                    x: candle.dates,
-                    open: candle.open,
-                    high: candle.high,
-                    low: candle.low,
-                    close: candle.close,
-                    increasing: { line: { color: 'green' }, fillcolor: 'green' },
-                    decreasing: { line: { color: 'red' }, fillcolor: 'red' },
-                    type: 'candlestick',
-                    name: 'Predicted (O/H/L/C)'
-                });
+                traces.push({ x: candle.dates, open: candle.open, high: candle.high, low: candle.low, close: candle.close, increasing: { line: { color: 'green' } }, decreasing: { line: { color: 'red' } }, type: 'candlestick', name: 'Predicted (O/H/L/C)' });
             }
 
-            // compute earliest date for tick0 so daily ticks align
             const allDates = [].concat(histRange.dates || [], candle.dates || []).filter(d => d);
             let tick0 = null;
             if (allDates.length > 0) {
@@ -140,20 +104,11 @@
 
             const layout = {
                 title: `Stock: ${stock}`,
-                xaxis: {
-                    type: 'date',
-                    tickformat: '%m-%d',
-                    tickangle: -45,
-                    // force daily ticks
-                    dtick: 24 * 3600 * 1000,
-                    tick0: tick0,
-                    rangeslider: { visible: false }
-                },
+                xaxis: { type: 'date', tickformat: '%m-%d', tickangle: -45, dtick: 24 * 3600 * 1000, tick0: tick0, rangeslider: { visible: false } },
                 yaxis: { tickprefix: '$', autorange: true },
                 margin: { t: 40 }
             };
 
-            // compute y-range to decide whether to show forecast lines
             let minY = Number.POSITIVE_INFINITY, maxY = Number.NEGATIVE_INFINITY;
             histRange.lows.forEach(v => { if (!isNaN(v)) minY = Math.min(minY, v); });
             histRange.highs.forEach(v => { if (!isNaN(v)) maxY = Math.max(maxY, v); });
@@ -174,24 +129,6 @@
                 addShape(forecast.Median, 'black', 'Forecast Median');
                 addShape(forecast.Low, 'red', 'Forecast Low');
             }
-            // If forecast exists but values are off-chart, add concise labels at top/bottom
-            if (forecast && minY !== null) {
-                const offAnnotations = [];
-                const addOff = (value, color, text) => {
-                    if (!value || isNaN(value)) return;
-                    if (value < minY) {
-                        // place label at bottom outside plot area
-                        offAnnotations.push({ xref: 'paper', x: 0.99, xanchor: 'right', yref: 'paper', y: -0.02, yanchor: 'top', text: `${text}: $${value.toFixed(2)}`, showarrow: false, font: { color: color } });
-                    } else if (value > maxY) {
-                        // place label at top outside plot area
-                        offAnnotations.push({ xref: 'paper', x: 0.99, xanchor: 'right', yref: 'paper', y: 1.02, yanchor: 'bottom', text: `${text}: $${value.toFixed(2)}`, showarrow: false, font: { color: color } });
-                    }
-                };
-                addOff(forecast.High, 'green', 'Forecast High');
-                addOff(forecast.Median, 'goldenrod', 'Forecast Median');
-                addOff(forecast.Low, 'red', 'Forecast Low');
-                if (offAnnotations.length) layout.annotations = (layout.annotations || []).concat(offAnnotations);
-            }
             if (shapes.length) layout.shapes = shapes;
             if (annotations.length) layout.annotations = (layout.annotations || []).concat(annotations);
 
@@ -211,7 +148,6 @@
             try {
                 const [dataText, histText] = await Promise.all([fetchText(dataUrl), fetchText(histUrl)]);
 
-                // try forecast optionally
                 let forecast = null;
                 try {
                     const fText = await fetchText(forecastUrl);
@@ -248,11 +184,8 @@
         (function init() {
             const stockInput = document.getElementById('stockInput');
             const loadBtn = document.getElementById('loadBtn');
-            const openNewTabBtn = document.getElementById('openNewTabBtn');
-            const qStock = getQueryParam('stock');
-            if (qStock) { stockInput.value = qStock.toUpperCase(); loadForStock(stockInput.value); }
+            stockInput.value = "TSLA";
             loadBtn.addEventListener('click', () => { const s = (stockInput.value||'').trim().toUpperCase(); if (!s) return alert('Enter a stock symbol first.'); loadForStock(s); });
-            openNewTabBtn.addEventListener('click', () => { const s = (stockInput.value||'').trim().toUpperCase(); if (!s) return alert('Enter a stock symbol first.'); window.open(`${location.pathname}?stock=${encodeURIComponent(s)}`, '_blank'); });
         })();
     </script>
 </body>
