@@ -186,6 +186,8 @@
             const loadBtn = document.getElementById('loadBtn');
             stockInput.value = "TSLA";
             loadBtn.addEventListener('click', () => { const s = (stockInput.value||'').trim().toUpperCase(); if (!s) return alert('Enter a stock symbol first.'); loadForStock(s); });
+            // auto-load default symbol on page load
+            loadForStock(stockInput.value.trim().toUpperCase());
         })();
     </script>
 </body>
