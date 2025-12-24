@@ -174,8 +174,26 @@
                 addShape(forecast.Median, 'black', 'Forecast Median');
                 addShape(forecast.Low, 'red', 'Forecast Low');
             }
+            // If forecast exists but values are off-chart, add concise labels at top/bottom
+            if (forecast && minY !== null) {
+                const offAnnotations = [];
+                const addOff = (value, color, text) => {
+                    if (!value || isNaN(value)) return;
+                    if (value < minY) {
+                        // place label at bottom outside plot area
+                        offAnnotations.push({ xref: 'paper', x: 0.99, xanchor: 'right', yref: 'paper', y: -0.02, yanchor: 'top', text: `${text}: $${value.toFixed(2)}`, showarrow: false, font: { color: color } });
+                    } else if (value > maxY) {
+                        // place label at top outside plot area
+                        offAnnotations.push({ xref: 'paper', x: 0.99, xanchor: 'right', yref: 'paper', y: 1.02, yanchor: 'bottom', text: `${text}: $${value.toFixed(2)}`, showarrow: false, font: { color: color } });
+                    }
+                };
+                addOff(forecast.High, 'green', 'Forecast High');
+                addOff(forecast.Median, 'goldenrod', 'Forecast Median');
+                addOff(forecast.Low, 'red', 'Forecast Low');
+                if (offAnnotations.length) layout.annotations = (layout.annotations || []).concat(offAnnotations);
+            }
             if (shapes.length) layout.shapes = shapes;
-            if (annotations.length) layout.annotations = annotations;
+            if (annotations.length) layout.annotations = (layout.annotations || []).concat(annotations);
 
             Plotly.newPlot('chart', traces, layout, {responsive: true});
         }
