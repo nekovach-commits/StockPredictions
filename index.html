@@ -120,7 +120,7 @@
             const annotations = [];
             if (forecast && minY !== null) {
                 const addShape = (value, color, text) => {
-                    if (!value || isNaN(value)) return;
+                    if (value === null || value === undefined || isNaN(value)) return;
                     if (value < minY || value > maxY) return;
                     shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: value, y1: value, line: { color: color, width: 2, dash: 'dash' } });
                     annotations.push({ xref: 'paper', x: 1.01, y: value, xanchor: 'left', yanchor: 'middle', text: `${text}: $${value.toFixed(2)}`, showarrow: false, font: { color: color } });
@@ -157,7 +157,8 @@
                         const h = parseFloat(parts[0]);
                         const m = parseFloat(parts[1]);
                         const l = parseFloat(parts[2]);
-                        forecast = { High: isNaN(h) ? 0 : h, Median: isNaN(m) ? 0 : m, Low: isNaN(l) ? 0 : l };
+                        // use null for missing values so zero is treated as valid
+                        forecast = { High: isNaN(h) ? null : h, Median: isNaN(m) ? null : m, Low: isNaN(l) ? null : l };
                     }
                 } catch (e) { forecast = null; }
 
