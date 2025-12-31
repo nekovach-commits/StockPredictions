@@ -106,7 +106,8 @@
                 title: `Stock: ${stock}`,
                 xaxis: { type: 'date', tickformat: '%m-%d', tickangle: -45, dtick: 24 * 3600 * 1000, tick0: tick0, rangeslider: { visible: false } },
                 yaxis: { tickprefix: '$', autorange: true },
-                margin: { t: 40 }
+                margin: { t: 40 },
+                showlegend: false
             };
 
             let minY = Number.POSITIVE_INFINITY, maxY = Number.NEGATIVE_INFINITY;
