@@ -124,7 +124,7 @@
                     if (value === null || value === undefined || isNaN(value)) return;
                     if (value < minY || value > maxY) return;
                     shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: value, y1: value, line: { color: color, width: 2, dash: 'dash' } });
-                    annotations.push({ xref: 'paper', x: 1.01, y: value, xanchor: 'left', yanchor: 'middle', text: `${text}: $${value.toFixed(2)}`, showarrow: false, font: { color: color } });
+                    annotations.push({ xref: 'paper', x: 0.5, y: value, xanchor: 'center', yanchor: 'middle', text: `${text}: $${value.toFixed(2)}`, showarrow: false, font: { color: color }, bgcolor: 'rgba(255,255,255,0.8)', bordercolor: color, borderwidth: 1 });
                 };
                 addShape(forecast.High, 'green', 'Forecast High');
                 addShape(forecast.Median, 'black', 'Forecast Median');
