@@ -1,2 +1,2 @@
 High,Median,Low
-25,5,9
+25,7,9
